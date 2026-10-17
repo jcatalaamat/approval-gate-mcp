@@ -1,0 +1,39 @@
+{
+  "operations": {
+    "notes": {
+      "list": {
+        "name": "List notes",
+        "description": "List files in the tenant's notes folder. Read-only.",
+        "inputSchema": {"type": "object", "properties": {"folder": {"type": "string", "description": "subfolder, '.' for the root"}}, "required": []}
+      },
+      "read": {
+        "name": "Read a note",
+        "description": "Read one note by exact relative path. There is deliberately no search: the caller must already know the path.",
+        "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "relative path, e.g. 'plan.md'"}}, "required": ["path"]}
+      },
+      "publish": {
+        "name": "Publish a note",
+        "description": "Copy a note to the tenant's published folder. Outward-facing, so it goes through the approval gate.",
+        "requires_confirmation": true,
+        "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}
+      }
+    },
+    "spend": {
+      "balance": {
+        "name": "Budget balance",
+        "description": "Show this tenant's budget cap and what is left. Read-only.",
+        "inputSchema": {"type": "object", "properties": {}, "required": []}
+      },
+      "charge": {
+        "name": "Charge the budget",
+        "description": "Record a spend against the tenant's hard budget cap. Goes through the approval gate and the cap is re-checked when it runs.",
+        "requires_confirmation": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {"amount_cents": {"type": "integer", "description": "amount in cents, > 0"}, "memo": {"type": "string"}},
+          "required": ["amount_cents", "memo"]
+        }
+      }
+    }
+  }
+}
