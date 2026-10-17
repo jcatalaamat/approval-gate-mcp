@@ -6,7 +6,7 @@ from pathlib import Path
 
 from . import audit
 from .errors import GateError
-from .gate import ApprovalGate
+from .gate import ApprovalGate, digest
 from .tenant import MAX_READ_BYTES, Tenant
 
 OPERATIONS_PATH = Path(__file__).resolve().parent.parent.parent / "operations.json"
@@ -17,8 +17,10 @@ def load_operations(path: Path = OPERATIONS_PATH) -> dict:
 
 
 class Dispatcher:
-    def __init__(self, tenant: Tenant, gate: ApprovalGate | None = None, operations: dict | None = None):
+    def __init__(self, tenant: Tenant, gate: ApprovalGate | None = None, operations: dict | None = None,
+                 require_approval: bool = False):
         self.tenant = tenant
+        self.require_approval = require_approval
         self.gate = gate or ApprovalGate()
         self.operations = operations or load_operations()
         self.flat = {f"{c}.{a}": op for c, acts in self.operations.items() for a, op in acts.items()}
@@ -48,9 +50,19 @@ class Dispatcher:
                 if not token:
                     params = self._validate(op, raw)
                     preview = self.gate.propose(self.tenant.id, operation, params)
+                    if self.require_approval:
+                        self.tenant.write_proposal(preview["confirm_token"], {"tenant": self.tenant.id, "operation": operation, "params": params})
+                        preview["note"] = (
+                            "NOT executed. A human must approve this out of band by running "
+                            f"`python -m approval_gate_mcp.approve {preview['confirm_token']}`; only then will confirm work."
+                        )
                     audit.record(self.tenant.root, self.tenant.id, operation, params, "proposed")
                     return json.dumps(preview, indent=2)
+                if self.require_approval:
+                    self._check_human_approval(operation, token)
                 params = self.gate.confirm(self.tenant.id, operation, token)  # the proposed params, not the resent ones
+                if self.require_approval:
+                    self.tenant.clear_approval(token)
             else:
                 params = self._validate(op, raw)
             result = self._handlers[operation](params)
@@ -59,6 +71,15 @@ class Dispatcher:
             raise
         audit.record(self.tenant.root, self.tenant.id, operation, params, "executed")
         return result
+
+    def _check_human_approval(self, operation: str, token: str) -> None:
+        """The approval is bound to a digest of tenant + operation + exact params, written by a separate process."""
+        granted = self.tenant.granted_digest(token)
+        if granted is None:
+            raise GateError("awaiting human approval; the model cannot approve its own action")
+        proposal = self.tenant.read_proposal(token)
+        if granted != digest(self.tenant.id, operation, proposal["params"]):
+            raise GateError("approval does not match the proposed action")
 
     @staticmethod
     def _validate(op: dict, params: dict) -> dict:

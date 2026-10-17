@@ -52,6 +52,38 @@ class Tenant:
             raise GateError("this file is excluded by the credentials denylist")
         return candidate
 
+    # out-of-band approvals: a human approves with a separate command, never through the model
+    @property
+    def approvals_dir(self) -> Path:
+        return self.root / "approvals"
+
+    @staticmethod
+    def _check_token(token: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", token or ""):
+            raise GateError("malformed confirm_token")
+        return token
+
+    def write_proposal(self, token: str, record: dict) -> None:
+        self.approvals_dir.mkdir(exist_ok=True)
+        (self.approvals_dir / f"{self._check_token(token)}.json").write_text(json.dumps(record, indent=2))
+
+    def read_proposal(self, token: str) -> dict:
+        try:
+            return json.loads((self.approvals_dir / f"{self._check_token(token)}.json").read_text())
+        except FileNotFoundError:
+            raise GateError("no such proposal")
+
+    def grant(self, token: str, digest_value: str) -> None:
+        (self.approvals_dir / f"{self._check_token(token)}.ok").write_text(digest_value)
+
+    def granted_digest(self, token: str) -> str | None:
+        f = self.approvals_dir / f"{self._check_token(token)}.ok"
+        return f.read_text().strip() if f.is_file() else None
+
+    def clear_approval(self, token: str) -> None:
+        for ext in ("json", "ok"):
+            (self.approvals_dir / f"{self._check_token(token)}.{ext}").unlink(missing_ok=True)
+
     # budget: a hard cap per tenant, re-checked at the moment an action actually runs
     @property
     def budget_file(self) -> Path:

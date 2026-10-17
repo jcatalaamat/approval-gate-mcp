@@ -1,5 +1,5 @@
 """End-to-end check over real MCP stdio: spawn the server, discover, preview, confirm, and try to cross tenants."""
-import asyncio, json, os, shutil, sys, tempfile
+import asyncio, json, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
@@ -18,7 +18,7 @@ async def main():
     shutil.copytree(ROOT / "fixtures", data)
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "approval_gate_mcp"], cwd=str(ROOT),
-        env={**os.environ, "GATE_TENANT": "acme", "GATE_DATA_DIR": str(data)},
+        env={**os.environ, "GATE_TENANT": "acme", "GATE_DATA_DIR": str(data), "GATE_REQUIRE_APPROVAL": "1"},
     )
     async with stdio_client(params) as (r, w):
         async with ClientSession(r, w) as s:
@@ -28,6 +28,10 @@ async def main():
             print("discover:", list(json.loads(await call(s, "discover")).keys()))
             prev = json.loads(await call(s, "execute", operation="spend.charge", params={"amount_cents": 1200, "memo": "api credits"}))
             print("preview pending:", prev["pending"], "| balance untouched:", json.loads(await call(s, "execute", operation="spend.balance"))["spent_cents"] == 0)
+            print("model tries to self-confirm:", await call(s, "execute", operation="spend.charge", params={"confirm_token": prev["confirm_token"]}))
+            human = subprocess.run([sys.executable, "-m", "approval_gate_mcp.approve", prev["confirm_token"]], input="y\n", text=True,
+                                   capture_output=True, cwd=str(ROOT), env={**os.environ, "GATE_TENANT": "acme", "GATE_DATA_DIR": str(data)})
+            print("human approves out of band:", human.stdout.strip().splitlines()[-1])
             done = json.loads(await call(s, "execute", operation="spend.charge", params={"confirm_token": prev["confirm_token"], "amount_cents": 49000}))
             print("confirmed, charged:", done["charged_cents"], "(resent 49000 ignored)")
             print("replay:", await call(s, "execute", operation="spend.charge", params={"confirm_token": prev["confirm_token"]}))

@@ -1,6 +1,7 @@
 """MCP server (stdio). Three tools in front of every operation; the tenant comes from the environment."""
 
 import json
+import os
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -62,6 +63,6 @@ def build_server(dispatcher: Dispatcher) -> Server:
 
 
 async def main() -> None:
-    app = build_server(Dispatcher(Tenant.from_env()))
+    app = build_server(Dispatcher(Tenant.from_env(), require_approval=os.environ.get("GATE_REQUIRE_APPROVAL", "1") != "0"))
     async with stdio_server() as (read, write):
         await app.run(read, write, app.create_initialization_options())
